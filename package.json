@@ -1,0 +1,18 @@
+{
+  "name": "linkplease",
+  "version": "1.0.0",
+  "description": "Instagram DM automation backend",
+  "main": "linkplease.js",
+  "scripts": {
+    "start": "node linkplease.js",
+    "dev": "node linkplease.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "axios": "^1.6.0",
+    "dotenv": "^16.3.1"
+  },
+  "engines": {
+    "node": "18.x"
+  }
+}
