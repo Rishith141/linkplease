@@ -2,169 +2,108 @@
 
 ## What's Implemented
 
-- **Part A:** Rule matching, webhook deduplication, DM sending, stats tracking
-- **Part B:** Webhook signature verification (HMAC-SHA256 validation)
+- **Part A – Core Reliability:**
+  - Rule matching (case-insensitive substring match)
+  - HMAC-SHA256 signature verification on raw request body (`X-PseudoGram-Signature`)
+  - Webhook event deduplication (`event_id`)
+  - User + rule deduplication (`user_id`, logical `rule_id + user_id` operation)
+  - Global outbound DM queue & rate limiter (max 10 requests per rolling 60s window)
+  - Retry state machine for 500 errors and 429 rate limits (respects `Retry-After`)
+  - Delivery reconciliation polling loop (`GET /v1/dm/{dm_id}`)
+  - Cancellation of unsent DM jobs upon receiving `comment.deleted`
+  - Accurate dynamic `/stats` calculation
+
+- **Part B – Security:**
+  - `express.json({ verify })` captures raw body buffer before JSON parsing
+  - Rejects forged or missing signature requests with HTTP 401
+  - Timing-safe signature comparison via `crypto.timingSafeEqual`
 
 ---
 
-## Step 1: Get Your API Key
+## Folder Structure
 
-1. Go to https://pseudogram-api.onrender.com
-2. POST to `/v1/apply` with your details:
-```bash
-curl -X POST https://pseudogram-api.onrender.com/v1/apply \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Your Name",
-    "email": "your@email.com",
-    "phone": "+91...",
-    "whatsapp": "+91...",
-    "linkedin_url": "https://linkedin.com/in/you"
-  }'
+```
+linkplease/
+  ├── linkplease.js          # Core Express application server
+  ├── test_linkplease.js     # Comprehensive local test suite (22 tests)
+  ├── package.json           # Dependencies (express, axios, dotenv)
+  ├── FAILURES.md            # Honest documentation of edge cases & limitations
+  ├── DEPLOY.md              # Deployment guide (this document)
+  ├── .env.example           # Template environment variable placeholders
+  ├── .gitignore             # Ignores .env and node_modules/
+  └── .env                   # Local env variables (NOT committed to Git)
 ```
 
-3. Once approved, POST to `/v1/keygen`:
-```bash
-curl -X POST https://pseudogram-api.onrender.com/v1/keygen \
-  -H "Content-Type: application/json" \
-  -d '{"email": "your@email.com"}'
+---
+
+## Step 1: Environment Setup
+
+Create `.env` locally (never commit this file):
+
+```ini
+API_KEY=your_pseudogram_api_key_here
+PORT=3000
 ```
 
-Save the `api_key` you get back.
+Verify `.gitignore` contains:
+```
+node_modules/
+.env
+.env.local
+```
 
-## Step 2: Setup Locally (Test First)
+---
 
+## Step 2: Local Testing
+
+Start the server:
 ```bash
-# Clone repo or create folder
-mkdir linkplease && cd linkplease
-
-# Copy the files I gave you:
-# - linkplease.js
-# - package.json
-# - .env.example
-
-# Create .env file
-cp .env.example .env
-# Edit .env, add your API_KEY
-
-# Install dependencies
-npm install
-
-# Start server
 npm start
-# Should see: "LinkPlease server running on port 3000"
-
-# Test locally (in another terminal)
-curl -X POST http://localhost:3000/rules \
-  -H "Content-Type: application/json" \
-  -d '{"keyword": "PRICE", "dm_message": "Here is our price list"}'
-
-# Should return: { "rule_id": "rule_...", "keyword": "PRICE", ... }
-
-curl http://localhost:3000/stats
-# Should return: { "sent": 0, "failed": 0, "queued": 0, "duplicates_blocked": 0 }
+# Server running on port 3000
 ```
 
-## Step 3: Push to GitHub
-
+In a second terminal, execute the local test suite:
 ```bash
-git init
-git add .
-git commit -m "LinkPlease backend - Part A+B"
-git remote add origin https://github.com/YOUR_USERNAME/linkplease.git
-git push -u origin main
-
-# Make sure repo is PUBLIC
+node test_linkplease.js
 ```
 
-## Step 4: Deploy to Render
+All 22 test scenarios should report `✅ PASS`.
 
-1. Go to https://render.com
-2. Sign up with GitHub
-3. Click "New +" → "Web Service"
-4. Connect your GitHub repo (linkplease)
-5. Fill in:
-   - **Name:** linkplease
-   - **Environment:** Node
-   - **Build Command:** `npm install`
-   - **Start Command:** `npm start`
-6. Click "Advanced" and add Environment Variable:
-   - **Key:** API_KEY
-   - **Value:** (paste your LinkPlease API key)
-7. Click "Create Web Service"
+---
 
-Wait 2-3 minutes. You'll get a URL like `https://linkplease-xxx.onrender.com`
+## Step 3: Deploying to Render.com
 
-## Step 5: Test Deployed Version
+1. Push your changes to GitHub:
+   ```bash
+   git add linkplease.js FAILURES.md DEPLOY.md .env.example test_linkplease.js
+   git commit -m "Implement LinkPlease backend reliability, rate limiter, and test suite"
+   git push origin main
+   ```
 
+2. Open the Render Dashboard → Select your Web Service.
+3. In **Environment Variables**:
+   - Add `API_KEY`: `<your_real_pseudogram_api_key>`
+   - `PORT`: set automatically by Render (code defaults to `process.env.PORT || 3000`)
+4. Trigger **Manual Deploy** → **Deploy latest commit**.
+
+---
+
+## Step 4: Verification After Deployment
+
+Verify your deployed URL health and stats:
 ```bash
-# Test your rules endpoint
-curl -X POST https://linkplease-xxx.onrender.com/rules \
-  -H "Content-Type: application/json" \
-  -d '{"keyword": "PRICE", "dm_message": "Check our pricing: https://..."}'
-
-# Test stats
-curl https://linkplease-xxx.onrender.com/stats
+curl https://<your-app-name>.onrender.com/health
+curl https://<your-app-name>.onrender.com/stats
 ```
 
-## Step 6: Test with LinkPlease Simulator
-
+Test with PseudoGram Simulator (optional):
 ```bash
-# Get run_id
 curl -X POST https://pseudogram-api.onrender.com/v1/simulate/start \
   -H "X-API-Key: YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "webhook_url": "https://linkplease-xxx.onrender.com/webhook",
+    "webhook_url": "https://<your-app-name>.onrender.com/webhook",
     "count": 50,
-    "duration_seconds": 10
-  }'
-
-# Wait for simulation to finish, then check truth
-curl https://pseudogram-api.onrender.com/v1/simulate/RUN_ID/truth \
-  -H "X-API-Key: YOUR_API_KEY"
-
-# Compare with your /stats
-curl https://linkplease-xxx.onrender.com/stats
-```
-
-## Step 7: Submit
-
-POST to https://pseudogram-api.onrender.com/v1/submit:
-
-```bash
-curl -X POST https://pseudogram-api.onrender.com/v1/submit \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "your@email.com",
-    "github_repo": "https://github.com/YOUR_USERNAME/linkplease",
-    "working_url": "https://linkplease-xxx.onrender.com",
-    "loom_url": "https://loom.com/share/...",
-    "parts_completed": "A+B",
-    "start_date": "2026-08-16"
+    "duration_seconds": 15
   }'
 ```
-
----
-
-## Troubleshooting
-
-**Stats don't match truth:**
-- Make sure you're checking queued correctly (recalculated from dmQueue each time)
-- Run simulator with smaller count (10 not 500) to debug
-
-**Getting 429 rate limited:**
-- Reduce comment count in simulator
-- Space out tests by 60+ seconds
-
-**Webhook not receiving events:**
-- Check Render logs: Dashboard → Select app → Logs
-- Make sure working_url is correct and live
-
-**API key not working:**
-- Confirm you got 202 Accepted on keygen
-- Try a fresh application if stuck on 403
-
-**Signature verification failing:**
-- Ensure your API_KEY is set correctly in Render env vars
-- Check logs for "Signature mismatch" errors
